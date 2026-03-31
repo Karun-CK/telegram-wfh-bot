@@ -23,21 +23,45 @@ if (!BOT_TOKEN || !BASE_URL || !JSONBIN_BIN_ID || !JSONBIN_API_KEY) {
 const JSONBIN_BASE = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
 
 async function readStore() {
-  const res = await axios.get(`${JSONBIN_BASE}/latest`, {
-    headers: { 'X-Master-Key': JSONBIN_API_KEY }
-  });
-  return res.data.record;
+  try {
+    const res = await axios.get(`${JSONBIN_BASE}/latest`, {
+      headers: { 'X-Master-Key': JSONBIN_API_KEY },
+      timeout: 15000
+    });
+    return res.data.record;
+  } catch (e) {
+    console.error('JSONBIN_READ_ERROR', {
+      message: e?.message,
+      code: e?.code,
+      status: e?.response?.status,
+      statusText: e?.response?.statusText
+    });
+    throw e;
+  }
 }
 
+
 async function writeStore(store) {
-  await axios.put(JSONBIN_BASE, store, {
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Master-Key': JSONBIN_API_KEY,
-      'X-Bin-Versioning': 'true'
-    }
-  });
+  try {
+    await axios.put(JSONBIN_BASE, store, {
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Master-Key': JSONBIN_API_KEY,
+        'X-Bin-Versioning': 'true'
+      },
+      timeout: 15000
+    });
+  } catch (e) {
+    console.error('JSONBIN_WRITE_ERROR', {
+      message: e?.message,
+      code: e?.code,
+      status: e?.response?.status,
+      statusText: e?.response?.statusText
+    });
+    throw e;
+  }
 }
+
 
 // Serialize writes to avoid collisions when many users click at once
 let writeQueue = Promise.resolve();
