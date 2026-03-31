@@ -294,3 +294,29 @@ app.listen(PORT, async () => {
   await bot.telegram.setWebhook(webhookUrl);
   console.log(`Listening on ${PORT}. Webhook set to ${webhookUrl}`);
 });
+bot.command('menu', async (ctx) => {
+  return ctx.reply(
+    'Choose an option:',
+    Markup.inlineKeyboard([
+      [Markup.button.callback('WFH (pick date)', 'OPEN_WFH')],
+      [Markup.button.callback('Office (pick date)', 'OPEN_OFFICE')],
+      [Markup.button.callback('View (pick date)', 'OPEN_VIEW')]
+    ])
+  );
+});
+
+bot.action('OPEN_WFH', async (ctx) => {
+  await ctx.answerCbQuery();
+  return openCalendar(ctx, 'WFH');
+});
+
+bot.action('OPEN_OFFICE', async (ctx) => {
+  await ctx.answerCbQuery();
+  return openCalendar(ctx, 'OFFICE');
+});
+
+bot.action('OPEN_VIEW', async (ctx) => {
+  await ctx.answerCbQuery();
+  return openCalendar(ctx, 'VIEW');
+});
+
