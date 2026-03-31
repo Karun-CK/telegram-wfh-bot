@@ -285,6 +285,11 @@ bot.action(/^CAL\|(WFH|OFFICE|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})$/, async (ctx) =>
 });
 
 // Webhook + health
+app.post('/telegram/webhook', (req, res, next) => {
+  console.log('INCOMING UPDATE:', JSON.stringify(req.body));
+  next();
+});
+
 app.use(bot.webhookCallback(WEBHOOK_PATH));
 app.get('/', (req, res) => res.status(200).send('OK'));
 
