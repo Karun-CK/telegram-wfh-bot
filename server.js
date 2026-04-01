@@ -170,11 +170,16 @@ function buildCalendarKeyboard(action, y, mo) {
   return Markup.inlineKeyboard(rows);
 }
 
-async function saveEntry(store, tgId, dateISO, mode) {
+async function saveEntry(store, tgId, dateISO, mode, team) {
   store.entries = store.entries || {};
   store.entries[dateISO] = store.entries[dateISO] || {};
-  store.entries[dateISO][String(tgId)] = { mode, ts: new Date().toISOString() };
+  store.entries[dateISO][String(tgId)] = {
+    mode,          // "WFH" or "OFFICE"
+    team,          // "PC" or "AE"
+    ts: new Date().toISOString()
+  };
 }
+
 
 // Bot
 const bot = new Telegraf(BOT_TOKEN);
@@ -199,12 +204,20 @@ function openCalendar(ctx, action) {
 
   return ctx.reply(title, kb);
 }
-
+function openTeamPicker(ctx, action) {
+  return ctx.reply(
+    'Select Team:',
+    Markup.inlineKeyboard([
+      [Markup.button.callback('PC', `TEAM|${action}|PC`)],
+      [Markup.button.callback('AE', `TEAM|${action}|AE`)]
+    ])
+  );
+}
 bot.command('wfh', (ctx) => openCalendar(ctx, 'WFH'));
 bot.command('office', (ctx) => openCalendar(ctx, 'OFFICE'));
 bot.command('view', (ctx) => openCalendar(ctx, 'VIEW'));
 
-bot.action(/^CAL\|(WFH|OFFICE|VIEW)\|NAV\|(\d{4}-\d{2})$/, async (ctx) => {
+bot.action(/^CAL\|((?:WFH|OFFICE)_(?:PC|AE)|VIEW)\|NAV\|(\d{4}-\d{2})$/, async (ctx) => {
   await ctx.answerCbQuery();
   const action = ctx.match[1];
   const [yStr, mStr] = ctx.match[2].split('-');
@@ -215,7 +228,7 @@ bot.action(/^CAL\|(WFH|OFFICE|VIEW)\|NAV\|(\d{4}-\d{2})$/, async (ctx) => {
   return ctx.editMessageReplyMarkup(kb.reply_markup);
 });
 
-bot.action(/^CAL\|(WFH|OFFICE|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})$/, async (ctx) => {
+bot.action(/^CAL\|((?:WFH|OFFICE)_(?:PC|AE)|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})$/, async (ctx) => {
   await ctx.answerCbQuery();
   const action = ctx.match[1];
   const dateISO = ctx.match[2];
@@ -229,7 +242,8 @@ bot.action(/^CAL\|(WFH|OFFICE|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})$/, async (ctx) =>
       await ensureUser(store, ctx.from);
 
       if (action !== 'VIEW') {
-        await saveEntry(store, ctx.from.id, dateISO, action);
+  const [mode, team] = action.split('_'); // mode=WFH/OFFICE, team=PC/AE
+  await saveEntry(store, ctx.from.id, dateISO, mode, team);
       }
 
       await writeStore(store);
@@ -250,8 +264,8 @@ bot.action(/^CAL\|(WFH|OFFICE|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})$/, async (ctx) =>
       for (const u of known) {
         const entry = dayEntries[u.tgId];
         if (!entry) notSet.push(u.name);
-        else if (entry.mode === 'OFFICE') office.push(u.name);
-        else if (entry.mode === 'WFH') wfh.push(u.name);
+        else if (entry.mode === 'OFFICE') office.push(`${u.name} [${entry.team || 'NA'}]`);
+        else if (entry.mode === 'WFH') wfh.push(`${u.name} [${entry.team || 'NA'}]`);
         else notSet.push(u.name);
       }
 
@@ -276,6 +290,15 @@ bot.action(/^CAL\|(WFH|OFFICE|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})$/, async (ctx) =>
     statusText,
     data: e?.response?.data
   });
+bot.action(/^TEAM\|(WFH|OFFICE)\|(PC|AE)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const action = ctx.match[1]; // WFH or OFFICE
+  const team = ctx.match[2];   // PC or AE
+
+  // Open calendar, but we must remember the team in the callback data.
+  // We'll do that by using action like: WFH_PC or OFFICE_AE
+  return openCalendar(ctx, `${action}_${team}`);
+});
 
   // Show only safe info to user (no secrets)
   return ctx.reply(`Storage error (JSONbin). (${status || 'no-status'}) Please try again.`);
