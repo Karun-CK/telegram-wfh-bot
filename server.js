@@ -248,10 +248,22 @@ bot.action(/^CAL\|(WFH|OFFICE|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})$/, async (ctx) =>
     }
 
     return ctx.reply(`Saved: ${action} for ${dateISO}. You can change it anytime via /wfh or /office.`);
-  } catch (e) {
-    console.error('PICK_HANDLER_ERROR', e?.message, e?.response?.status);
-    return ctx.reply('Storage error (JSONbin). Please try again later.');
-  }
+} catch (e) {
+  const status = e?.response?.status;
+  const statusText = e?.response?.statusText;
+  const msg = e?.message;
+
+  console.error('PICK_HANDLER_ERROR', {
+    message: msg,
+    status,
+    statusText,
+    data: e?.response?.data
+  });
+
+  // Show only safe info to user (no secrets)
+  return ctx.reply(`Storage error (JSONbin). (${status || 'no-status'}) Please try again.`);
+}
+
 });
 
 // Health
