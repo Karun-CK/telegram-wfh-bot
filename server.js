@@ -40,6 +40,24 @@ async function writeStore(store) {
     timeout: 15000
   });
 }
+// DEBUG: test JSONbin write permissions (safe output, no secrets)
+app.get('/debug/jsonbin-write', async (req, res) => {
+  try {
+    const store = await readStore();
+    store.config = store.config || {};
+    store.config.lastWriteTest = new Date().toISOString();
+    await writeStore(store);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({
+      ok: false,
+      message: e?.message,
+      status: e?.response?.status,
+      statusText: e?.response?.statusText,
+      data: e?.response?.data
+    });
+  }
+});
 
 // Serialize writes
 let writeQueue = Promise.resolve();
