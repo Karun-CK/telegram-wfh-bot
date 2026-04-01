@@ -35,7 +35,6 @@ async function writeStore(store) {
     headers: {
       'Content-Type': 'application/json',
       'X-Master-Key': JSONBIN_API_KEY,
-      'X-Bin-Versioning': 'true'
     },
     timeout: 15000
   });
