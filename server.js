@@ -31,7 +31,7 @@ async function readStore() {
 }
 
 async function writeStore(store) {
-  // IMPORTANT: no X-Bin-Versioning header (JSONbin Free plan forbids it)
+  // JSONbin Free: do NOT use X-Bin-Versioning
   await axios.put(JSONBIN_BASE, store, {
     headers: {
       'Content-Type': 'application/json',
@@ -109,7 +109,7 @@ function monthLabel(y, mo) {
 }
 
 // Calendar callback data
-// action can be: VIEW or WFH_PC / WFH_AE / OFFICE_PC / OFFICE_AE
+// action can be: VIEW or <MODE>_<TEAM> where MODE in {WFH, OFFICE, OOO} and TEAM in {PC, AE}
 function calCb(action, type, value) {
   return `CAL|${action}|${type}|${value}`;
 }
@@ -158,8 +158,8 @@ async function saveEntry(store, tgId, dateISO, mode, team) {
   store.entries = store.entries || {};
   store.entries[dateISO] = store.entries[dateISO] || {};
   store.entries[dateISO][String(tgId)] = {
-    mode, // "WFH" or "OFFICE"
-    team, // "PC" or "AE"
+    mode, // "WFH" | "OFFICE" | "OOO"
+    team, // "PC" | "AE"
     ts: new Date().toISOString()
   };
 }
@@ -172,11 +172,12 @@ bot.start(async (ctx) => {
     'Commands:\n' +
     '/wfh - select Team (PC/AE) then pick a date\n' +
     '/office - select Team (PC/AE) then pick a date\n' +
+    '/ooo - select Team (PC/AE) then pick a date (Out Of Office)\n' +
     '/view - pick a date and view everyoneâs status'
   );
 });
 
-// Team picker (Telegram doesnât have a true dropdown; inline buttons are the standard)
+// Team picker
 function openTeamPicker(ctx, mode) {
   return ctx.reply(
     'Team:',
@@ -199,12 +200,14 @@ function openCalendar(ctx, action) {
   return ctx.reply(title, kb);
 }
 
+// Commands
 bot.command('wfh', (ctx) => openTeamPicker(ctx, 'WFH'));
 bot.command('office', (ctx) => openTeamPicker(ctx, 'OFFICE'));
+bot.command('ooo', (ctx) => openTeamPicker(ctx, 'OOO'));
 bot.command('view', (ctx) => openCalendar(ctx, 'VIEW'));
 
-// After team selection, open calendar with action like WFH_PC, OFFICE_AE, etc.
-bot.action(/^TEAM\|(WFH|OFFICE)\|(PC|AE)$/, async (ctx) => {
+// After team selection, open calendar with action like WFH_PC, OOO_AE, etc.
+bot.action(/^TEAM\|(WFH|OFFICE|OOO)\|(PC|AE)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const mode = ctx.match[1];
   const team = ctx.match[2];
@@ -212,7 +215,7 @@ bot.action(/^TEAM\|(WFH|OFFICE)\|(PC|AE)$/, async (ctx) => {
 });
 
 // Calendar navigation
-bot.action(/^CAL\|((?:WFH|OFFICE)_(?:PC|AE)|VIEW)\|NAV\|(\d{4}-\d{2})$/, async (ctx) => {
+bot.action(/^CAL\|((?:WFH|OFFICE|OOO)_(?:PC|AE)|VIEW)\|NAV\|(\d{4}-\d{2})$/, async (ctx) => {
   await ctx.answerCbQuery();
   const action = ctx.match[1];
   const [yStr, mStr] = ctx.match[2].split('-');
@@ -224,7 +227,7 @@ bot.action(/^CAL\|((?:WFH|OFFICE)_(?:PC|AE)|VIEW)\|NAV\|(\d{4}-\d{2})$/, async (
 });
 
 // Calendar pick
-bot.action(/^CAL\|((?:WFH|OFFICE)_(?:PC|AE)|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})$/, async (ctx) => {
+bot.action(/^CAL\|((?:WFH|OFFICE|OOO)_(?:PC|AE)|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})$/, async (ctx) => {
   await ctx.answerCbQuery();
   const action = ctx.match[1];
   const dateISO = ctx.match[2];
@@ -238,7 +241,7 @@ bot.action(/^CAL\|((?:WFH|OFFICE)_(?:PC|AE)|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})$/, 
       await ensureUser(store, ctx.from);
 
       if (action !== 'VIEW') {
-        const [mode, team] = action.split('_'); // e.g. WFH_PC
+        const [mode, team] = action.split('_'); // e.g. OOO_PC
         await saveEntry(store, ctx.from.id, dateISO, mode, team);
       }
 
@@ -251,6 +254,7 @@ bot.action(/^CAL\|((?:WFH|OFFICE)_(?:PC|AE)|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})$/, 
 
       const office = [];
       const wfh = [];
+      const ooo = [];
       const notSet = [];
 
       const known = Object.entries(users)
@@ -265,6 +269,8 @@ bot.action(/^CAL\|((?:WFH|OFFICE)_(?:PC|AE)|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})$/, 
           office.push(`${u.name} [${entry.team || 'NA'}]`);
         } else if (entry.mode === 'WFH') {
           wfh.push(`${u.name} [${entry.team || 'NA'}]`);
+        } else if (entry.mode === 'OOO') {
+          ooo.push(`${u.name} [${entry.team || 'NA'}]`);
         } else {
           notSet.push(u.name);
         }
@@ -274,13 +280,15 @@ bot.action(/^CAL\|((?:WFH|OFFICE)_(?:PC|AE)|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})$/, 
         `Status for ${dateISO} (IST)\n\n` +
         `Office (${office.length}):\n${office.join('\n') || '-'}\n\n` +
         `WFH (${wfh.length}):\n${wfh.join('\n') || '-'}\n\n` +
+        `Out Of Office (${ooo.length}):\n${ooo.join('\n') || '-'}\n\n` +
         `Not set (${notSet.length}):\n${notSet.join('\n') || '-'}`;
 
       return ctx.reply(msg);
     }
 
     const [mode, team] = action.split('_');
-    return ctx.reply(`Saved: ${mode} (${team}) for ${dateISO}. You can change it anytime.`);
+    const modeLabel = mode === 'OOO' ? 'Out Of Office' : mode;
+    return ctx.reply(`Saved: ${modeLabel} (${team}) for ${dateISO}. You can change it anytime.`);
   } catch (e) {
     console.error('PICK_HANDLER_ERROR', {
       message: e?.message,
