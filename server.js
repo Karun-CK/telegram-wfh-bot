@@ -363,7 +363,8 @@ app.post('/telegram/webhook', (req, res, next) => {
   next();
 });
 
-app.use(bot.webhookCallback(WEBHOOK_PATH));
+// IMPORTANT: Telegraf webhook callback must be mounted as POST on the exact path
+app.post(WEBHOOK_PATH, (req, res) => bot.handleUpdate(req.body, res));
 app.get('/', (req, res) => res.status(200).send('OK'));
 process.on('unhandledRejection', (reason) => {
   console.error('UNHANDLED_REJECTION:', reason);
@@ -408,3 +409,10 @@ app.get('/telegram/webhook', (req, res) => {
   res.status(200).send('Webhook endpoint is up (GET). Telegram uses POST.');
 });
 
+process.on('unhandledRejection', (reason) => {
+  console.error('UNHANDLED_REJECTION:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('UNCAUGHT_EXCEPTION:', err);
+});
