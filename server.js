@@ -380,4 +380,7 @@ bot.action('OPEN_VIEW', async (ctx) => {
   await ctx.answerCbQuery();
   return openCalendar(ctx, 'VIEW');
 });
+app.get('/telegram/webhook', (req, res) => {
+  res.status(200).send('Webhook endpoint is up (GET). Telegram uses POST.');
+});
 
