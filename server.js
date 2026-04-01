@@ -348,6 +348,13 @@ app.post('/telegram/webhook', (req, res, next) => {
 
 app.use(bot.webhookCallback(WEBHOOK_PATH));
 app.get('/', (req, res) => res.status(200).send('OK'));
+process.on('unhandledRejection', (reason) => {
+  console.error('UNHANDLED_REJECTION:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('UNCAUGHT_EXCEPTION:', err);
+});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
