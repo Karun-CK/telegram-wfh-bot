@@ -264,6 +264,27 @@ process.on('unhandledRejection', (reason) => console.error('UNHANDLED_REJECTION:
 process.on('uncaughtException', (err) => console.error('UNCAUGHT_EXCEPTION:', err));
 
 const PORT = process.env.PORT || 3000;
+app.get('/debug/jsonbin', async (req, res) => {
+  try {
+    const store = await readStore();
+    res.json({
+      ok: true,
+      topLevelKeys: Object.keys(store || {}),
+      usersCount: store?.users ? Object.keys(store.users).length : 0,
+      datesCount: store?.entries ? Object.keys(store.entries).length : 0
+    });
+  } catch (e) {
+    res.status(500).json({
+      ok: false,
+      message: e?.message,
+      code: e?.code,
+      status: e?.response?.status,
+      statusText: e?.response?.statusText,
+      data: e?.response?.data
+    });
+  }
+});
+
 app.listen(PORT, () => {
   const webhookUrl = `${BASE_URL}${WEBHOOK_PATH}`;
   bot.telegram.setWebhook(webhookUrl)
