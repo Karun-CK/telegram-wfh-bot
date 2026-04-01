@@ -34,7 +34,6 @@ const express = require('express');
 const axios = require('axios');
 const { Telegraf, Markup } = require('telegraf');
 
-app.use(express.json());
 // DEBUG: show current webhook info from Telegram
 app.get('/debug/webhook', async (req, res) => {
   try {
