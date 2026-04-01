@@ -1,4 +1,34 @@
 require('dotenv').config();
+const app = express();
+app.use(express.json());
+// DEBUG: quick check that new code is deployed
+app.get('/debug/ping', (req, res) => {
+  res.status(200).send('pong');
+});
+
+// DEBUG: set webhook to a simple test endpoint
+app.get('/debug/setwebhooktest', async (req, res) => {
+  try {
+    const url = `${process.env.BASE_URL}/telegram/webhook-test`;
+    const r = await axios.get(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/setWebhook`, {
+      params: { url }
+    });
+    res.json({ url, telegram: r.data });
+  } catch (e) {
+    res.status(500).json({
+      ok: false,
+      message: e?.message,
+      status: e?.response?.status,
+      data: e?.response?.data
+    });
+  }
+});
+
+// TEMP: raw webhook test endpoint (bypasses Telegraf)
+app.post('/telegram/webhook-test', (req, res) => {
+  console.log('WEBHOOK_TEST_HIT');
+  res.status(200).send('OK');
+});
 
 const express = require('express');
 const axios = require('axios');
