@@ -31,34 +31,17 @@ async function readStore() {
 }
 
 async function writeStore(store) {
+  // IMPORTANT: no X-Bin-Versioning header (JSONbin Free plan forbids it)
   await axios.put(JSONBIN_BASE, store, {
     headers: {
       'Content-Type': 'application/json',
-      'X-Master-Key': JSONBIN_API_KEY,
+      'X-Master-Key': JSONBIN_API_KEY
     },
     timeout: 15000
   });
 }
-// DEBUG: test JSONbin write permissions (safe output, no secrets)
-app.get('/debug/jsonbin-write', async (req, res) => {
-  try {
-    const store = await readStore();
-    store.config = store.config || {};
-    store.config.lastWriteTest = new Date().toISOString();
-    await writeStore(store);
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({
-      ok: false,
-      message: e?.message,
-      status: e?.response?.status,
-      statusText: e?.response?.statusText,
-      data: e?.response?.data
-    });
-  }
-});
 
-// Serialize writes
+// Serialize writes (avoid collisions)
 let writeQueue = Promise.resolve();
 function withWriteLock(fn) {
   writeQueue = writeQueue.then(fn).catch(() => fn());
@@ -126,6 +109,7 @@ function monthLabel(y, mo) {
 }
 
 // Calendar callback data
+// action can be: VIEW or WFH_PC / WFH_AE / OFFICE_PC / OFFICE_AE
 function calCb(action, type, value) {
   return `CAL|${action}|${type}|${value}`;
 }
@@ -174,12 +158,11 @@ async function saveEntry(store, tgId, dateISO, mode, team) {
   store.entries = store.entries || {};
   store.entries[dateISO] = store.entries[dateISO] || {};
   store.entries[dateISO][String(tgId)] = {
-    mode,          // "WFH" or "OFFICE"
-    team,          // "PC" or "AE"
+    mode, // "WFH" or "OFFICE"
+    team, // "PC" or "AE"
     ts: new Date().toISOString()
   };
 }
-
 
 // Bot
 const bot = new Telegraf(BOT_TOKEN);
@@ -187,36 +170,48 @@ const bot = new Telegraf(BOT_TOKEN);
 bot.start(async (ctx) => {
   return ctx.reply(
     'Commands:\n' +
-    '/wfh - pick a date and mark WFH\n' +
-    '/office - pick a date and mark Office\n' +
+    '/wfh - select Team (PC/AE) then pick a date\n' +
+    '/office - select Team (PC/AE) then pick a date\n' +
     '/view - pick a date and view everyoneâs status'
   );
 });
+
+// Team picker (Telegram doesnât have a true dropdown; inline buttons are the standard)
+function openTeamPicker(ctx, mode) {
+  return ctx.reply(
+    'Team:',
+    Markup.inlineKeyboard([
+      [Markup.button.callback('PC', `TEAM|${mode}|PC`)],
+      [Markup.button.callback('AE', `TEAM|${mode}|AE`)]
+    ])
+  );
+}
 
 function openCalendar(ctx, action) {
   const { y, mo } = nowInISTParts();
   const kb = buildCalendarKeyboard(action, y, mo);
 
   const title =
-    action === 'WFH' ? 'Pick a date to mark WFH:' :
-    action === 'OFFICE' ? 'Pick a date to mark Office:' :
-    'Pick a date to view everyoneâs status:';
+    action === 'VIEW'
+      ? 'Pick a date to view everyoneâs status:'
+      : 'Pick a date:';
 
   return ctx.reply(title, kb);
 }
-function openTeamPicker(ctx, action) {
-  return ctx.reply(
-    'Select Team:',
-    Markup.inlineKeyboard([
-      [Markup.button.callback('PC', `TEAM|${action}|PC`)],
-      [Markup.button.callback('AE', `TEAM|${action}|AE`)]
-    ])
-  );
-}
-bot.command('wfh', (ctx) => openCalendar(ctx, 'WFH'));
-bot.command('office', (ctx) => openCalendar(ctx, 'OFFICE'));
+
+bot.command('wfh', (ctx) => openTeamPicker(ctx, 'WFH'));
+bot.command('office', (ctx) => openTeamPicker(ctx, 'OFFICE'));
 bot.command('view', (ctx) => openCalendar(ctx, 'VIEW'));
 
+// After team selection, open calendar with action like WFH_PC, OFFICE_AE, etc.
+bot.action(/^TEAM\|(WFH|OFFICE)\|(PC|AE)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const mode = ctx.match[1];
+  const team = ctx.match[2];
+  return openCalendar(ctx, `${mode}_${team}`);
+});
+
+// Calendar navigation
 bot.action(/^CAL\|((?:WFH|OFFICE)_(?:PC|AE)|VIEW)\|NAV\|(\d{4}-\d{2})$/, async (ctx) => {
   await ctx.answerCbQuery();
   const action = ctx.match[1];
@@ -228,6 +223,7 @@ bot.action(/^CAL\|((?:WFH|OFFICE)_(?:PC|AE)|VIEW)\|NAV\|(\d{4}-\d{2})$/, async (
   return ctx.editMessageReplyMarkup(kb.reply_markup);
 });
 
+// Calendar pick
 bot.action(/^CAL\|((?:WFH|OFFICE)_(?:PC|AE)|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})$/, async (ctx) => {
   await ctx.answerCbQuery();
   const action = ctx.match[1];
@@ -242,8 +238,8 @@ bot.action(/^CAL\|((?:WFH|OFFICE)_(?:PC|AE)|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})$/, 
       await ensureUser(store, ctx.from);
 
       if (action !== 'VIEW') {
-  const [mode, team] = action.split('_'); // mode=WFH/OFFICE, team=PC/AE
-  await saveEntry(store, ctx.from.id, dateISO, mode, team);
+        const [mode, team] = action.split('_'); // e.g. WFH_PC
+        await saveEntry(store, ctx.from.id, dateISO, mode, team);
       }
 
       await writeStore(store);
@@ -263,10 +259,15 @@ bot.action(/^CAL\|((?:WFH|OFFICE)_(?:PC|AE)|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})$/, 
 
       for (const u of known) {
         const entry = dayEntries[u.tgId];
-        if (!entry) notSet.push(u.name);
-        else if (entry.mode === 'OFFICE') office.push(`${u.name} [${entry.team || 'NA'}]`);
-        else if (entry.mode === 'WFH') wfh.push(`${u.name} [${entry.team || 'NA'}]`);
-        else notSet.push(u.name);
+        if (!entry) {
+          notSet.push(u.name);
+        } else if (entry.mode === 'OFFICE') {
+          office.push(`${u.name} [${entry.team || 'NA'}]`);
+        } else if (entry.mode === 'WFH') {
+          wfh.push(`${u.name} [${entry.team || 'NA'}]`);
+        } else {
+          notSet.push(u.name);
+        }
       }
 
       const msg =
@@ -278,65 +279,29 @@ bot.action(/^CAL\|((?:WFH|OFFICE)_(?:PC|AE)|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})$/, 
       return ctx.reply(msg);
     }
 
-    return ctx.reply(`Saved: ${action} for ${dateISO}. You can change it anytime via /wfh or /office.`);
-} catch (e) {
-  const status = e?.response?.status;
-  const statusText = e?.response?.statusText;
-  const msg = e?.message;
-
-  console.error('PICK_HANDLER_ERROR', {
-    message: msg,
-    status,
-    statusText,
-    data: e?.response?.data
-  });
-bot.action(/^TEAM\|(WFH|OFFICE)\|(PC|AE)$/, async (ctx) => {
-  await ctx.answerCbQuery();
-  const action = ctx.match[1]; // WFH or OFFICE
-  const team = ctx.match[2];   // PC or AE
-
-  // Open calendar, but we must remember the team in the callback data.
-  // We'll do that by using action like: WFH_PC or OFFICE_AE
-  return openCalendar(ctx, `${action}_${team}`);
-});
-
-  // Show only safe info to user (no secrets)
-  return ctx.reply(`Storage error (JSONbin). (${status || 'no-status'}) Please try again.`);
-}
-
+    const [mode, team] = action.split('_');
+    return ctx.reply(`Saved: ${mode} (${team}) for ${dateISO}. You can change it anytime.`);
+  } catch (e) {
+    console.error('PICK_HANDLER_ERROR', {
+      message: e?.message,
+      status: e?.response?.status,
+      statusText: e?.response?.statusText,
+      data: e?.response?.data
+    });
+    return ctx.reply(`Storage error (JSONbin). (${e?.response?.status || 'no-status'}) Please try again.`);
+  }
 });
 
 // Health
 app.get('/', (req, res) => res.status(200).send('OK'));
 
-// Webhook: explicit POST handler (most reliable)
+// Webhook: explicit POST handler (reliable on Render)
 app.post(WEBHOOK_PATH, (req, res) => bot.handleUpdate(req.body, res));
 
 process.on('unhandledRejection', (reason) => console.error('UNHANDLED_REJECTION:', reason));
 process.on('uncaughtException', (err) => console.error('UNCAUGHT_EXCEPTION:', err));
 
 const PORT = process.env.PORT || 3000;
-app.get('/debug/jsonbin', async (req, res) => {
-  try {
-    const store = await readStore();
-    res.json({
-      ok: true,
-      topLevelKeys: Object.keys(store || {}),
-      usersCount: store?.users ? Object.keys(store.users).length : 0,
-      datesCount: store?.entries ? Object.keys(store.entries).length : 0
-    });
-  } catch (e) {
-    res.status(500).json({
-      ok: false,
-      message: e?.message,
-      code: e?.code,
-      status: e?.response?.status,
-      statusText: e?.response?.statusText,
-      data: e?.response?.data
-    });
-  }
-});
-
 app.listen(PORT, () => {
   const webhookUrl = `${BASE_URL}${WEBHOOK_PATH}`;
   bot.telegram.setWebhook(webhookUrl)
