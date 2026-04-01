@@ -345,6 +345,10 @@ app.post('/telegram/webhook', (req, res, next) => {
   console.log('INCOMING UPDATE:', JSON.stringify(req.body));
   next();
 });
+app.post('/telegram/webhook', (req, res, next) => {
+  console.log('TELEGRAM_UPDATE_RECEIVED');
+  next();
+});
 
 app.use(bot.webhookCallback(WEBHOOK_PATH));
 app.get('/', (req, res) => res.status(200).send('OK'));
