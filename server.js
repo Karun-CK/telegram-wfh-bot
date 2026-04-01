@@ -6,6 +6,38 @@ const { Telegraf, Markup } = require('telegraf');
 
 const app = express();
 app.use(express.json());
+// DEBUG: show current webhook info from Telegram
+app.get('/debug/webhook', async (req, res) => {
+  try {
+    const r = await axios.get(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/getWebhookInfo`);
+    res.json(r.data);
+  } catch (e) {
+    res.status(500).json({
+      ok: false,
+      message: e?.message,
+      status: e?.response?.status,
+      data: e?.response?.data
+    });
+  }
+});
+
+// DEBUG: force set webhook to BASE_URL + WEBHOOK_PATH
+app.get('/debug/setwebhook', async (req, res) => {
+  try {
+    const url = `${process.env.BASE_URL}${process.env.WEBHOOK_PATH || '/telegram/webhook'}`;
+    const r = await axios.get(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/setWebhook`, {
+      params: { url }
+    });
+    res.json({ url, telegram: r.data });
+  } catch (e) {
+    res.status(500).json({
+      ok: false,
+      message: e?.message,
+      status: e?.response?.status,
+      data: e?.response?.data
+    });
+  }
+});
 
 // ENV
 const BOT_TOKEN = process.env.BOT_TOKEN;
