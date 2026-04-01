@@ -248,12 +248,6 @@ bot.start(async (ctx) => {
 });
 
 async function openCalendar(ctx, action) {
-  const store = await readStore();
-  await withWriteLock(async () => {
-    await ensureUser(store, ctx.from);
-    await writeStore(store);
-  });
-
   const { y, mo } = nowInISTParts();
   const kb = buildCalendarKeyboard(action, y, mo);
 
@@ -264,6 +258,7 @@ async function openCalendar(ctx, action) {
 
   return ctx.reply(title, kb);
 }
+
 
 bot.command('wfh', (ctx) => openCalendar(ctx, 'WFH'));
 bot.command('office', (ctx) => openCalendar(ctx, 'OFFICE'));
@@ -287,7 +282,25 @@ bot.action(/^CAL\|(WFH|OFFICE|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})$/, async (ctx) =>
   await ctx.answerCbQuery();
   const action = ctx.match[1];
   const dateISO = ctx.match[2];
+try {
+    const store = await readStore();
 
+    await withWriteLock(async () => {
+      await ensureUser(store, ctx.from);
+
+      if (action !== 'VIEW') {
+        await saveEntry(store, ctx.from.id, dateISO, action);
+      }
+
+      await writeStore(store);
+    });
+
+    // ... then render VIEW or confirm save ...
+  } catch (e) {
+    console.error('PICK_HANDLER_ERROR', e?.message, e?.response?.status);
+    return ctx.reply('Storage error (JSONbin). Please try again later.');
+  }
+});
   if (!parseISODate(dateISO)) return ctx.reply('Invalid date.');
 
   const store = await readStore();
