@@ -19,6 +19,14 @@ if (!BOT_TOKEN || !BASE_URL || !JSONBIN_BIN_ID || !JSONBIN_API_KEY) {
   throw new Error('Missing env vars: BOT_TOKEN, BASE_URL, JSONBIN_BIN_ID, JSONBIN_API_KEY');
 }
 
+// Chat type helpers
+function isPrivate(ctx) {
+  return ctx.chat && ctx.chat.type === 'private';
+}
+function isGroup(ctx) {
+  return ctx.chat && (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup');
+}
+
 // JSONbin
 const JSONBIN_BASE = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
 
@@ -168,24 +176,33 @@ async function saveEntry(store, tgId, dateISO, mode, team) {
 const bot = new Telegraf(BOT_TOKEN);
 
 bot.start(async (ctx) => {
+  // In group: stay silent (per your requirement)
+  if (isGroup(ctx)) return;
+
   return ctx.reply(
     'Commands:\n' +
-    '/wfh - select Team (PC/AE) then pick a date\n' +
-    '/office - select Team (PC/AE) then pick a date\n' +
-    '/ooo - select Team (PC/AE) then pick a date (Out Of Office)\n' +
+    '/wfh - select Team then pick a date (DM only)\n' +
+    '/office - select Team then pick a date (DM only)\n' +
+    '/ooo - select Team then pick a date (DM only)\n' +
     '/view - pick a date and view everyoneâs status'
   );
 });
 
-// Team picker
-function openTeamPicker(ctx, mode) {
-  return ctx.reply(
-    'Team:',
-    Markup.inlineKeyboard([
-      [Markup.button.callback('PC', `TEAM|${mode}|PC`)],
-      [Markup.button.callback('AE', `TEAM|${mode}|AE`)]
-    ])
-  );
+// Team picker keyboard
+function teamKeyboard(mode) {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('PC', `TEAM|${mode}|PC`)],
+    [Markup.button.callback('AE', `TEAM|${mode}|AE`)]
+  ]);
+}
+
+// Send DM silently (no group reply). If DM fails, do nothing.
+async function sendSilentDM(ctx, text, extra) {
+  try {
+    await ctx.telegram.sendMessage(ctx.from.id, text, extra);
+  } catch (e) {
+    // User hasn't started bot in DM or blocked bot; stay silent as requested.
+  }
 }
 
 function openCalendar(ctx, action) {
@@ -200,15 +217,30 @@ function openCalendar(ctx, action) {
   return ctx.reply(title, kb);
 }
 
-// Commands
-bot.command('wfh', (ctx) => openTeamPicker(ctx, 'WFH'));
-bot.command('office', (ctx) => openTeamPicker(ctx, 'OFFICE'));
-bot.command('ooo', (ctx) => openTeamPicker(ctx, 'OOO'));
+// Commands: in group -> DM; in private -> respond normally
+bot.command('wfh', async (ctx) => {
+  if (isGroup(ctx)) return sendSilentDM(ctx, 'Team (WFH):', teamKeyboard('WFH'));
+  return ctx.reply('Team (WFH):', teamKeyboard('WFH'));
+});
+
+bot.command('office', async (ctx) => {
+  if (isGroup(ctx)) return sendSilentDM(ctx, 'Team (Office):', teamKeyboard('OFFICE'));
+  return ctx.reply('Team (Office):', teamKeyboard('OFFICE'));
+});
+
+bot.command('ooo', async (ctx) => {
+  if (isGroup(ctx)) return sendSilentDM(ctx, 'Team (Out Of Office):', teamKeyboard('OOO'));
+  return ctx.reply('Team (Out Of Office):', teamKeyboard('OOO'));
+});
+
+// /view: allowed in group and private (group-visible by design)
 bot.command('view', (ctx) => openCalendar(ctx, 'VIEW'));
 
-// After team selection, open calendar with action like WFH_PC, OOO_AE, etc.
+// Team selection: only allow in private (ignore in group)
 bot.action(/^TEAM\|(WFH|OFFICE|OOO)\|(PC|AE)$/, async (ctx) => {
   await ctx.answerCbQuery();
+  if (!isPrivate(ctx)) return;
+
   const mode = ctx.match[1];
   const team = ctx.match[2];
   return openCalendar(ctx, `${mode}_${team}`);
@@ -218,6 +250,10 @@ bot.action(/^TEAM\|(WFH|OFFICE|OOO)\|(PC|AE)$/, async (ctx) => {
 bot.action(/^CAL\|((?:WFH|OFFICE|OOO)_(?:PC|AE)|VIEW)\|NAV\|(\d{4}-\d{2})$/, async (ctx) => {
   await ctx.answerCbQuery();
   const action = ctx.match[1];
+
+  // Prevent navigating status-setting calendars in groups
+  if (action !== 'VIEW' && !isPrivate(ctx)) return;
+
   const [yStr, mStr] = ctx.match[2].split('-');
   const y = Number(yStr);
   const mo = Number(mStr);
@@ -234,6 +270,9 @@ bot.action(/^CAL\|((?:WFH|OFFICE|OOO)_(?:PC|AE)|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})
 
   if (!parseISODate(dateISO)) return ctx.reply('Invalid date.');
 
+  // Block saving actions in groups
+  if (action !== 'VIEW' && !isPrivate(ctx)) return;
+
   try {
     const store = await readStore();
 
@@ -241,7 +280,7 @@ bot.action(/^CAL\|((?:WFH|OFFICE|OOO)_(?:PC|AE)|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})
       await ensureUser(store, ctx.from);
 
       if (action !== 'VIEW') {
-        const [mode, team] = action.split('_'); // e.g. OOO_PC
+        const [mode, team] = action.split('_');
         await saveEntry(store, ctx.from.id, dateISO, mode, team);
       }
 
