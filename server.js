@@ -175,8 +175,8 @@ async function saveEntry(store, tgId, dateISO, mode, team) {
 // Bot
 const bot = new Telegraf(BOT_TOKEN);
 
+// In group: stay silent. In DM: show help.
 bot.start(async (ctx) => {
-  // In group: stay silent (per your requirement)
   if (isGroup(ctx)) return;
 
   return ctx.reply(
@@ -337,6 +337,136 @@ bot.action(/^CAL\|((?:WFH|OFFICE|OOO)_(?:PC|AE)|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})
     });
     return ctx.reply(`Storage error (JSONbin). (${e?.response?.status || 'no-status'}) Please try again.`);
   }
+});
+
+//
+// Public Web API + Dashboard
+//
+
+app.get('/api/status', async (req, res) => {
+  try {
+    const date = req.query.date;
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ ok: false, message: 'Invalid date. Use YYYY-MM-DD' });
+    }
+
+    const store = await readStore();
+    const users = store.users || {};
+    const dayEntries = (store.entries && store.entries[date]) ? store.entries[date] : {};
+
+    const rows = Object.entries(users)
+      .map(([tgId, u]) => {
+        const entry = dayEntries[tgId];
+        return {
+          name: u.name || tgId,
+          username: u.username || null,
+          team: entry?.team || null,
+          status: entry?.mode || 'NOT_SET',
+          updatedAt: entry?.ts || null
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    res.json({ ok: true, date, rows });
+  } catch (e) {
+    console.error('API_STATUS_ERROR', e?.message, e?.response?.status);
+    res.status(500).json({ ok: false, message: 'Server error' });
+  }
+});
+
+app.get('/dashboard', (req, res) => {
+  res.type('html').send(`
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Hybrid Status Dashboard</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+    th, td { border: 1px solid #ddd; padding: 8px; }
+    th { background: #f4f4f4; text-align: left; }
+    .muted { color: #666; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #eee; }
+  </style>
+</head>
+<body>
+  <h2>Hybrid Status Dashboard</h2>
+  <div class="row">
+    <label>Select date:</label>
+    <input id="date" type="date" />
+    <button onclick="loadData()">Load</button>
+    <span id="info" class="muted"></span>
+  </div>
+
+  <table id="tbl">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Team</th>
+        <th>Status</th>
+        <th>Updated</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+<script>
+  function isoToday() {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth()+1).padStart(2,'0');
+    const dd = String(d.getDate()).padStart(2,'0');
+    return yyyy + '-' + mm + '-' + dd;
+  }
+
+  document.getElementById('date').value = isoToday();
+
+  function fmtStatus(s) {
+    if (s === 'NOT_SET') return 'Not set';
+    if (s === 'OOO') return 'Out Of Office';
+    return s;
+  }
+
+  async function loadData() {
+    const date = document.getElementById('date').value;
+    document.getElementById('info').textContent = 'Loading...';
+
+    const r = await fetch('/api/status?date=' + encodeURIComponent(date));
+    const j = await r.json();
+
+    const tbody = document.querySelector('#tbl tbody');
+    tbody.innerHTML = '';
+
+    if (!j.ok) {
+      document.getElementById('info').textContent = 'Error: ' + (j.message || 'unknown');
+      return;
+    }
+
+    for (const row of j.rows) {
+      const tr = document.createElement('tr');
+      const team = row.team || '-';
+      const status = fmtStatus(row.status);
+      const updated = row.updatedAt ? new Date(row.updatedAt).toLocaleString() : '-';
+
+      tr.innerHTML =
+        '<td>' + row.name + '</td>' +
+        '<td><span class="pill">' + team + '</span></td>' +
+        '<td>' + status + '</td>' +
+        '<td class="muted">' + updated + '</td>';
+
+      tbody.appendChild(tr);
+    }
+
+    document.getElementById('info').textContent = j.rows.length + ' users';
+  }
+
+  loadData();
+</script>
+</body>
+</html>
+  `);
 });
 
 // Health
