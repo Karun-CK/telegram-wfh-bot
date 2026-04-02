@@ -380,37 +380,25 @@ app.get('/dashboard', (req, res) => {
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Hybrid Status Dashboard</title>
+  <title>WFH Dashboard</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 20px; }
-    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-    table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+    .muted { color: #666; }
+    .day { margin-top: 18px; }
+    .day h3 { margin: 0 0 8px 0; }
+    table { border-collapse: collapse; width: 100%; margin-top: 6px; }
     th, td { border: 1px solid #ddd; padding: 8px; }
     th { background: #f4f4f4; text-align: left; }
-    .muted { color: #666; }
-    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #eee; }
+    .pill { display:inline-block; padding:2px 8px; border-radius: 999px; font-size: 12px; }
+    .WFH { background:#e8f3ff; }
+    .Office { background:#e9f9ee; }
+    .OOO { background:#fff2e6; }
   </style>
 </head>
 <body>
   <h2>Hybrid Status Dashboard</h2>
-  <div class="row">
-    <label>Select date:</label>
-    <input id="date" type="date" />
-    <button onclick="loadData()">Load</button>
-    <span id="info" class="muted"></span>
-  </div>
-
-  <table id="tbl">
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Team</th>
-        <th>Status</th>
-        <th>Updated</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+  <div class="muted" id="info">Loading...</div>
+  <div id="root"></div>
 
 <script>
   function isoToday() {
@@ -421,48 +409,84 @@ app.get('/dashboard', (req, res) => {
     return yyyy + '-' + mm + '-' + dd;
   }
 
-  document.getElementById('date').value = isoToday();
-
-  function fmtStatus(s) {
-    if (s === 'NOT_SET') return 'Not set';
-    if (s === 'OOO') return 'Out Of Office';
-    return s;
+  function fmtDate(iso) {
+    // Show a friendly date label but keep ISO as source of truth
+    const d = new Date(iso + 'T00:00:00');
+    return d.toLocaleDateString(undefined, { weekday:'short', year:'numeric', month:'short', day:'numeric' });
   }
 
-  async function loadData() {
-    const date = document.getElementById('date').value;
-    document.getElementById('info').textContent = 'Loading...';
+  function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]));
+  }
 
-    const r = await fetch('/api/status?date=' + encodeURIComponent(date));
+  async function load() {
+    const from = isoToday();
+    const r = await fetch('/api/status-range?from=' + encodeURIComponent(from));
     const j = await r.json();
 
-    const tbody = document.querySelector('#tbl tbody');
-    tbody.innerHTML = '';
+    const root = document.getElementById('root');
+    root.innerHTML = '';
 
     if (!j.ok) {
       document.getElementById('info').textContent = 'Error: ' + (j.message || 'unknown');
       return;
     }
 
-    for (const row of j.rows) {
-      const tr = document.createElement('tr');
-      const team = row.team || '-';
-      const status = fmtStatus(row.status);
-      const updated = row.updatedAt ? new Date(row.updatedAt).toLocaleString() : '-';
+    const totalRows = (j.days || []).reduce((sum, d) => sum + (d.rows?.length || 0), 0);
+    document.getElementById('info').textContent =
+      'Showing from ' + j.from + ' â¢ ' + (j.days?.length || 0) + ' day(s) â¢ ' + totalRows + ' entry(ies)';
 
-      tr.innerHTML =
-        '<td>' + row.name + '</td>' +
-        '<td><span class="pill">' + team + '</span></td>' +
-        '<td>' + status + '</td>' +
-        '<td class="muted">' + updated + '</td>';
-
-      tbody.appendChild(tr);
+    if (!j.days || j.days.length === 0) {
+      root.innerHTML = '<p class="muted">No future entries found from today.</p>';
+      return;
     }
 
-    document.getElementById('info').textContent = j.rows.length + ' users';
+    for (const day of j.days) {
+      const wrap = document.createElement('div');
+      wrap.className = 'day';
+
+      const h = document.createElement('h3');
+      h.textContent = fmtDate(day.date) + ' (' + day.date + ')';
+      wrap.appendChild(h);
+
+      const table = document.createElement('table');
+      table.innerHTML = \`
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Team</th>
+            <th>Status</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      \`;
+
+      const tbody = table.querySelector('tbody');
+
+      for (const row of (day.rows || [])) {
+        const status = row.status || 'NOT_SET';
+        const updated = row.updatedAt ? new Date(row.updatedAt).toLocaleString() : '-';
+        const team = row.team || '-';
+
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + esc(row.name) + '</td>' +
+          '<td>' + esc(team) + '</td>' +
+          '<td><span class="pill ' + esc(status) + '">' + esc(status) + '</span></td>' +
+          '<td>' + esc(updated) + '</td>';
+
+        tbody.appendChild(tr);
+      }
+
+      wrap.appendChild(table);
+      root.appendChild(wrap);
+    }
   }
 
-  loadData();
+  load();
 </script>
 </body>
 </html>
@@ -484,4 +508,62 @@ app.listen(PORT, () => {
   bot.telegram.setWebhook(webhookUrl)
     .then(() => console.log(`Listening on ${PORT}. Webhook set to ${webhookUrl}`))
     .catch((e) => console.error('SET_WEBHOOK_ERROR', e?.message));
+});
+function isISODate(s) {
+  return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+}
+
+function isoToday() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+app.get('/api/status-range', async (req, res) => {
+  try {
+    const from = req.query.from || isoToday();
+    if (!isISODate(from)) {
+      return res.status(400).json({ ok: false, message: 'Invalid from date. Use YYYY-MM-DD' });
+    }
+
+    const store = await readStore();
+    const users = store.users || {};
+    const entriesByDate = store.entries || {};
+
+    // Get all dates in the store from "from" onwards, sorted
+    const dates = Object.keys(entriesByDate)
+      .filter(isISODate)
+      .filter(d => d >= from)
+      .sort();
+
+    const days = dates.map(date => {
+      const dayEntries = entriesByDate[date] || {};
+
+      // Only include users that actually have an entry for that date ("filled")
+      const rows = Object.entries(dayEntries)
+        .map(([tgId, entry]) => {
+          const u = users[tgId] || {};
+          return {
+            tgId,
+            name: u.name || tgId,
+            username: u.username || null,
+            team: entry?.team || null,
+            status: entry?.mode || 'NOT_SET',
+            updatedAt: entry?.ts || null
+          };
+        })
+        // Optional: hide NOT_SET rows if they ever exist in dayEntries
+        .filter(r => r.status !== 'NOT_SET' || r.team)
+        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+      return { date, rows };
+    }).filter(day => day.rows.length > 0); // only days with at least one filled row
+
+    res.json({ ok: true, from, days });
+  } catch (e) {
+    console.error('API_STATUS_RANGE_ERROR', e?.message, e?.response?.status);
+    res.status(500).json({ ok: false, message: 'Server error' });
+  }
 });
