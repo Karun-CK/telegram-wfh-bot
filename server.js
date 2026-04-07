@@ -23,6 +23,7 @@ if (!BOT_TOKEN || !BASE_URL || !JSONBIN_BIN_ID || !JSONBIN_API_KEY) {
 function isPrivate(ctx) {
   return ctx.chat && ctx.chat.type === 'private';
 }
+
 function isGroup(ctx) {
   return ctx.chat && (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup');
 }
@@ -51,6 +52,7 @@ async function writeStore(store) {
 
 // Serialize writes (avoid collisions)
 let writeQueue = Promise.resolve();
+
 function withWriteLock(fn) {
   writeQueue = writeQueue.then(fn).catch(() => fn());
   return writeQueue;
@@ -117,7 +119,7 @@ function monthLabel(y, mo) {
 }
 
 // Calendar callback data
-// action can be: VIEW or <MODE>_<TEAM> where MODE in {WFH, OFFICE, OOO} and TEAM in {PC, AE}
+// action format: <MODE>_<TEAM> where MODE in {WFH, OFFICE, OOO} and TEAM in {PC, AE}
 function calCb(action, type, value) {
   return `CAL|${action}|${type}|${value}`;
 }
@@ -128,7 +130,7 @@ function buildCalendarKeyboard(action, y, mo) {
   const mondayFirstOffset = (firstDow + 6) % 7;
 
   const rows = [];
-  rows.push([Markup.button.callback(`ð ${monthLabel(y, mo)}`, calCb(action, 'NAV', `${y}-${pad2(mo)}`))]);
+  rows.push([Markup.button.callback(`📅 ${monthLabel(y, mo)}`, calCb(action, 'NAV', `${y}-${pad2(mo)}`))]);
 
   rows.push(['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map(t =>
     Markup.button.callback(t, calCb(action, 'NAV', `${y}-${pad2(mo)}`))
@@ -155,8 +157,8 @@ function buildCalendarKeyboard(action, y, mo) {
   const next = mo === 12 ? { y: y + 1, mo: 1 } : { y, mo: mo + 1 };
 
   rows.push([
-    Markup.button.callback('â Prev', calCb(action, 'NAV', `${prev.y}-${pad2(prev.mo)}`)),
-    Markup.button.callback('Next â¶', calCb(action, 'NAV', `${next.y}-${pad2(next.mo)}`))
+    Markup.button.callback('◀ Prev', calCb(action, 'NAV', `${prev.y}-${pad2(prev.mo)}`)),
+    Markup.button.callback('Next ▶', calCb(action, 'NAV', `${next.y}-${pad2(next.mo)}`))
   ]);
 
   return Markup.inlineKeyboard(rows);
@@ -166,8 +168,8 @@ async function saveEntry(store, tgId, dateISO, mode, team) {
   store.entries = store.entries || {};
   store.entries[dateISO] = store.entries[dateISO] || {};
   store.entries[dateISO][String(tgId)] = {
-    mode, // "WFH" | "OFFICE" | "OOO"
-    team, // "PC" | "AE"
+    mode, // WFH | OFFICE | OOO
+    team, // PC | AE
     ts: new Date().toISOString()
   };
 }
@@ -183,8 +185,9 @@ bot.start(async (ctx) => {
     'Commands:\n' +
     '/wfh - select Team then pick a date (DM only)\n' +
     '/office - select Team then pick a date (DM only)\n' +
-    '/ooo - select Team then pick a date (DM only)\n' +
-    '/view - pick a date and view everyoneâs status'
+    '/ooo - select Team then pick a date (DM only)\n\n' +
+    'To view everyone’s status, use the web dashboard:\n' +
+    `${BASE_URL}/dashboard`
   );
 });
 
@@ -208,13 +211,7 @@ async function sendSilentDM(ctx, text, extra) {
 function openCalendar(ctx, action) {
   const { y, mo } = nowInISTParts();
   const kb = buildCalendarKeyboard(action, y, mo);
-
-  const title =
-    action === 'VIEW'
-      ? 'Pick a date to view everyoneâs status:'
-      : 'Pick a date:';
-
-  return ctx.reply(title, kb);
+  return ctx.reply('Pick a date:', kb);
 }
 
 // Commands: in group -> DM; in private -> respond normally
@@ -233,10 +230,7 @@ bot.command('ooo', async (ctx) => {
   return ctx.reply('Team (Out Of Office):', teamKeyboard('OOO'));
 });
 
-// /view: allowed in group and private (group-visible by design)
-bot.command('view', (ctx) => openCalendar(ctx, 'VIEW'));
-
-// Team selection: only allow in private (ignore in group)
+// Team selection: only allow in private
 bot.action(/^TEAM\|(WFH|OFFICE|OOO)\|(PC|AE)$/, async (ctx) => {
   await ctx.answerCbQuery();
   if (!isPrivate(ctx)) return;
@@ -247,13 +241,11 @@ bot.action(/^TEAM\|(WFH|OFFICE|OOO)\|(PC|AE)$/, async (ctx) => {
 });
 
 // Calendar navigation
-bot.action(/^CAL\|((?:WFH|OFFICE|OOO)_(?:PC|AE)|VIEW)\|NAV\|(\d{4}-\d{2})$/, async (ctx) => {
+bot.action(/^CAL\|((?:WFH|OFFICE|OOO)_(?:PC|AE))\|NAV\|(\d{4}-\d{2})$/, async (ctx) => {
   await ctx.answerCbQuery();
+  if (!isPrivate(ctx)) return;
+
   const action = ctx.match[1];
-
-  // Prevent navigating status-setting calendars in groups
-  if (action !== 'VIEW' && !isPrivate(ctx)) return;
-
   const [yStr, mStr] = ctx.match[2].split('-');
   const y = Number(yStr);
   const mo = Number(mStr);
@@ -263,15 +255,14 @@ bot.action(/^CAL\|((?:WFH|OFFICE|OOO)_(?:PC|AE)|VIEW)\|NAV\|(\d{4}-\d{2})$/, asy
 });
 
 // Calendar pick
-bot.action(/^CAL\|((?:WFH|OFFICE|OOO)_(?:PC|AE)|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})$/, async (ctx) => {
+bot.action(/^CAL\|((?:WFH|OFFICE|OOO)_(?:PC|AE))\|PICK\|(\d{4}-\d{2}-\d{2})$/, async (ctx) => {
   await ctx.answerCbQuery();
+  if (!isPrivate(ctx)) return;
+
   const action = ctx.match[1];
   const dateISO = ctx.match[2];
 
   if (!parseISODate(dateISO)) return ctx.reply('Invalid date.');
-
-  // Block saving actions in groups
-  if (action !== 'VIEW' && !isPrivate(ctx)) return;
 
   try {
     const store = await readStore();
@@ -279,55 +270,19 @@ bot.action(/^CAL\|((?:WFH|OFFICE|OOO)_(?:PC|AE)|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})
     await withWriteLock(async () => {
       await ensureUser(store, ctx.from);
 
-      if (action !== 'VIEW') {
-        const [mode, team] = action.split('_');
-        await saveEntry(store, ctx.from.id, dateISO, mode, team);
-      }
+      const [mode, team] = action.split('_');
+      await saveEntry(store, ctx.from.id, dateISO, mode, team);
 
       await writeStore(store);
     });
 
-    if (action === 'VIEW') {
-      const users = store.users || {};
-      const dayEntries = (store.entries && store.entries[dateISO]) ? store.entries[dateISO] : {};
-
-      const office = [];
-      const wfh = [];
-      const ooo = [];
-      const notSet = [];
-
-      const known = Object.entries(users)
-        .map(([tgId, u]) => ({ tgId, name: u.name || tgId }))
-        .sort((a, b) => a.name.localeCompare(b.name));
-
-      for (const u of known) {
-        const entry = dayEntries[u.tgId];
-        if (!entry) {
-          notSet.push(u.name);
-        } else if (entry.mode === 'OFFICE') {
-          office.push(`${u.name} [${entry.team || 'NA'}]`);
-        } else if (entry.mode === 'WFH') {
-          wfh.push(`${u.name} [${entry.team || 'NA'}]`);
-        } else if (entry.mode === 'OOO') {
-          ooo.push(`${u.name} [${entry.team || 'NA'}]`);
-        } else {
-          notSet.push(u.name);
-        }
-      }
-
-      const msg =
-        `Status for ${dateISO} (IST)\n\n` +
-        `Office (${office.length}):\n${office.join('\n') || '-'}\n\n` +
-        `WFH (${wfh.length}):\n${wfh.join('\n') || '-'}\n\n` +
-        `Out Of Office (${ooo.length}):\n${ooo.join('\n') || '-'}\n\n` +
-        `Not set (${notSet.length}):\n${notSet.join('\n') || '-'}`;
-
-      return ctx.reply(msg);
-    }
-
     const [mode, team] = action.split('_');
     const modeLabel = mode === 'OOO' ? 'Out Of Office' : mode;
-    return ctx.reply(`Saved: ${modeLabel} (${team}) for ${dateISO}. You can change it anytime.`);
+
+    return ctx.reply(
+      `Saved: ${modeLabel} (${team}) for ${dateISO}. You can change it anytime.\n\n` +
+      `Dashboard: ${BASE_URL}/dashboard`
+    );
   } catch (e) {
     console.error('PICK_HANDLER_ERROR', {
       message: e?.message,
@@ -338,6 +293,18 @@ bot.action(/^CAL\|((?:WFH|OFFICE|OOO)_(?:PC|AE)|VIEW)\|PICK\|(\d{4}-\d{2}-\d{2})
     return ctx.reply(`Storage error (JSONbin). (${e?.response?.status || 'no-status'}) Please try again.`);
   }
 });
+
+function isISODate(s) {
+  return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+}
+
+function isoToday() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
 
 //
 // Public Web API + Dashboard
@@ -374,6 +341,52 @@ app.get('/api/status', async (req, res) => {
   }
 });
 
+app.get('/api/status-range', async (req, res) => {
+  try {
+    const from = req.query.from || isoToday();
+    if (!isISODate(from)) {
+      return res.status(400).json({ ok: false, message: 'Invalid from date. Use YYYY-MM-DD' });
+    }
+
+    const store = await readStore();
+    const users = store.users || {};
+    const entriesByDate = store.entries || {};
+
+    // Get all dates in the store from "from" onwards, sorted
+    const dates = Object.keys(entriesByDate)
+      .filter(isISODate)
+      .filter(d => d >= from)
+      .sort();
+
+    const days = dates.map(date => {
+      const dayEntries = entriesByDate[date] || {};
+
+      // Only include users that actually have an entry for that date
+      const rows = Object.entries(dayEntries)
+        .map(([tgId, entry]) => {
+          const u = users[tgId] || {};
+          return {
+            tgId,
+            name: u.name || tgId,
+            username: u.username || null,
+            team: entry?.team || null,
+            status: entry?.mode || 'NOT_SET',
+            updatedAt: entry?.ts || null
+          };
+        })
+        .filter(r => r.status !== 'NOT_SET' || r.team)
+        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+      return { date, rows };
+    }).filter(day => day.rows.length > 0);
+
+    res.json({ ok: true, from, days });
+  } catch (e) {
+    console.error('API_STATUS_RANGE_ERROR', e?.message, e?.response?.status);
+    res.status(500).json({ ok: false, message: 'Server error' });
+  }
+});
+
 app.get('/dashboard', (req, res) => {
   res.type('html').send(`
 <!doctype html>
@@ -391,7 +404,7 @@ app.get('/dashboard', (req, res) => {
     th { background: #f4f4f4; text-align: left; }
     .pill { display:inline-block; padding:2px 8px; border-radius: 999px; font-size: 12px; }
     .WFH { background:#e8f3ff; }
-    .Office { background:#e9f9ee; }
+    .OFFICE { background:#e9f9ee; }
     .OOO { background:#fff2e6; }
   </style>
 </head>
@@ -410,7 +423,6 @@ app.get('/dashboard', (req, res) => {
   }
 
   function fmtDate(iso) {
-    // Show a friendly date label but keep ISO as source of truth
     const d = new Date(iso + 'T00:00:00');
     return d.toLocaleDateString(undefined, { weekday:'short', year:'numeric', month:'short', day:'numeric' });
   }
@@ -419,6 +431,13 @@ app.get('/dashboard', (req, res) => {
     return String(s ?? '').replace(/[&<>"']/g, c => ({
       '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
     }[c]));
+  }
+
+  function fmtStatus(s) {
+    if (s === 'OFFICE') return 'Office';
+    if (s === 'WFH') return 'WFH';
+    if (s === 'OOO') return 'Out Of Office';
+    return s || 'Not set';
   }
 
   async function load() {
@@ -436,7 +455,7 @@ app.get('/dashboard', (req, res) => {
 
     const totalRows = (j.days || []).reduce((sum, d) => sum + (d.rows?.length || 0), 0);
     document.getElementById('info').textContent =
-      'Showing from ' + j.from + ' â¢ ' + (j.days?.length || 0) + ' day(s) â¢ ' + totalRows + ' entry(ies)';
+      'Showing from ' + j.from + ' • ' + (j.days?.length || 0) + ' day(s) • ' + totalRows + ' entry(ies)';
 
     if (!j.days || j.days.length === 0) {
       root.innerHTML = '<p class="muted">No future entries found from today.</p>';
@@ -475,7 +494,7 @@ app.get('/dashboard', (req, res) => {
         tr.innerHTML =
           '<td>' + esc(row.name) + '</td>' +
           '<td>' + esc(team) + '</td>' +
-          '<td><span class="pill ' + esc(status) + '">' + esc(status) + '</span></td>' +
+          '<td><span class="pill ' + esc(status) + '">' + esc(fmtStatus(status)) + '</span></td>' +
           '<td>' + esc(updated) + '</td>';
 
         tbody.appendChild(tr);
@@ -496,7 +515,7 @@ app.get('/dashboard', (req, res) => {
 // Health
 app.get('/', (req, res) => res.status(200).send('OK'));
 
-// Webhook: explicit POST handler (reliable on Render)
+// Webhook: explicit POST handler
 app.post(WEBHOOK_PATH, (req, res) => bot.handleUpdate(req.body, res));
 
 process.on('unhandledRejection', (reason) => console.error('UNHANDLED_REJECTION:', reason));
@@ -508,62 +527,4 @@ app.listen(PORT, () => {
   bot.telegram.setWebhook(webhookUrl)
     .then(() => console.log(`Listening on ${PORT}. Webhook set to ${webhookUrl}`))
     .catch((e) => console.error('SET_WEBHOOK_ERROR', e?.message));
-});
-function isISODate(s) {
-  return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
-}
-
-function isoToday() {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-app.get('/api/status-range', async (req, res) => {
-  try {
-    const from = req.query.from || isoToday();
-    if (!isISODate(from)) {
-      return res.status(400).json({ ok: false, message: 'Invalid from date. Use YYYY-MM-DD' });
-    }
-
-    const store = await readStore();
-    const users = store.users || {};
-    const entriesByDate = store.entries || {};
-
-    // Get all dates in the store from "from" onwards, sorted
-    const dates = Object.keys(entriesByDate)
-      .filter(isISODate)
-      .filter(d => d >= from)
-      .sort();
-
-    const days = dates.map(date => {
-      const dayEntries = entriesByDate[date] || {};
-
-      // Only include users that actually have an entry for that date ("filled")
-      const rows = Object.entries(dayEntries)
-        .map(([tgId, entry]) => {
-          const u = users[tgId] || {};
-          return {
-            tgId,
-            name: u.name || tgId,
-            username: u.username || null,
-            team: entry?.team || null,
-            status: entry?.mode || 'NOT_SET',
-            updatedAt: entry?.ts || null
-          };
-        })
-        // Optional: hide NOT_SET rows if they ever exist in dayEntries
-        .filter(r => r.status !== 'NOT_SET' || r.team)
-        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-
-      return { date, rows };
-    }).filter(day => day.rows.length > 0); // only days with at least one filled row
-
-    res.json({ ok: true, from, days });
-  } catch (e) {
-    console.error('API_STATUS_RANGE_ERROR', e?.message, e?.response?.status);
-    res.status(500).json({ ok: false, message: 'Server error' });
-  }
 });
