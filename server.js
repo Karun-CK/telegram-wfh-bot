@@ -489,26 +489,49 @@ app.get('/dashboard', (req, res) => {
       return;
     }
 
-    for (const day of j.days) {
-      const wrap = document.createElement('div');
-      wrap.className = 'day';
+for (const day of (j.days || [])) {
+  const wrap = document.createElement('div');
+  wrap.className = 'day';
 
-      const h = document.createElement('h3');
-      h.textContent = fmtDate(day.date) + ' (' + day.date + ')';
-      wrap.appendChild(h);
+  const h = document.createElement('h3');
+  h.textContent = fmtDate(day.date) + ' (' + day.date + ')';
+  wrap.appendChild(h);
+for (const day of (j.days || [])) {
+  const wrap = document.createElement('div');
+  wrap.className = 'day';
 
-      const table = document.createElement('table');
-      table.innerHTML = \`
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Team</th>
-            <th>Status</th>
-            <th>Updated</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      \`;
+  const h = document.createElement('h3');
+  h.textContent = fmtDate(day.date) + ' (' + day.date + ')';
+  wrap.appendChild(h);
+
+  const wfhCount = (day.rows || []).filter(r => r.status === 'WFH').length;
+  const officeCount = (day.rows || []).filter(r => r.status === 'OFFICE').length;
+  const oooCount = (day.rows || []).filter(r => r.status === 'OOO').length;
+  const totalCount = (day.rows || []).length;
+
+  const summary = document.createElement('div');
+  summary.className = 'muted';
+  summary.style.marginBottom = '8px';
+  summary.textContent =
+    'Total: ' + totalCount +
+    ' | WFH: ' + wfhCount +
+    ' | Office: ' + officeCount +
+    ' | Out Of Office: ' + oooCount;
+  wrap.appendChild(summary);
+
+  const table = document.createElement('table');
+  table.innerHTML = `
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Team</th>
+        <th>Status</th>
+        <th>Updated</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  `;
+
 
       const tbody = table.querySelector('tbody');
 
