@@ -218,7 +218,8 @@ bot.start(async (ctx) => {
     'Commands:\n' +
     '/wfh - select Team then pick a date (DM only)\n' +
     '/office - select Team then pick a date (DM only)\n' +
-    '/ooo - select Team then pick a date (DM only)\n\n' +
+    '/ooo - select Team then pick a date (DM only)\n' +
+    '/dashboard - open the web dashboard\n\n' +
     'To view everyone\'s status, use the web dashboard:\n' +
     `${BASE_URL}/dashboard`
   );
@@ -261,6 +262,15 @@ bot.command('office', async (ctx) => {
 bot.command('ooo', async (ctx) => {
   if (isGroup(ctx)) return sendSilentDM(ctx, 'Team (Out Of Office):', teamKeyboard('OOO'));
   return ctx.reply('Team (Out Of Office):', teamKeyboard('OOO'));
+});
+
+bot.command('dashboard', async (ctx) => {
+  return ctx.reply(
+    'View everyone\'s status here:',
+    Markup.inlineKeyboard([
+      [Markup.button.url('Open Dashboard', `${BASE_URL}/dashboard`)]
+    ])
+  );
 });
 
 // Team selection: only allow in private
@@ -489,49 +499,41 @@ app.get('/dashboard', (req, res) => {
       return;
     }
 
-for (const day of (j.days || [])) {
-  const wrap = document.createElement('div');
-  wrap.className = 'day';
+    for (const day of (j.days || [])) {
+      const wrap = document.createElement('div');
+      wrap.className = 'day';
 
-  const h = document.createElement('h3');
-  h.textContent = fmtDate(day.date) + ' (' + day.date + ')';
-  wrap.appendChild(h);
-for (const day of (j.days || [])) {
-  const wrap = document.createElement('div');
-  wrap.className = 'day';
+      const h = document.createElement('h3');
+      h.textContent = fmtDate(day.date) + ' (' + day.date + ')';
+      wrap.appendChild(h);
 
-  const h = document.createElement('h3');
-  h.textContent = fmtDate(day.date) + ' (' + day.date + ')';
-  wrap.appendChild(h);
+      const wfhCount = (day.rows || []).filter(r => r.status === 'WFH').length;
+      const officeCount = (day.rows || []).filter(r => r.status === 'OFFICE').length;
+      const oooCount = (day.rows || []).filter(r => r.status === 'OOO').length;
+      const totalCount = (day.rows || []).length;
 
-  const wfhCount = (day.rows || []).filter(r => r.status === 'WFH').length;
-  const officeCount = (day.rows || []).filter(r => r.status === 'OFFICE').length;
-  const oooCount = (day.rows || []).filter(r => r.status === 'OOO').length;
-  const totalCount = (day.rows || []).length;
+      const summary = document.createElement('div');
+      summary.className = 'muted';
+      summary.style.marginBottom = '8px';
+      summary.textContent =
+        'Total: ' + totalCount +
+        ' | WFH: ' + wfhCount +
+        ' | Office: ' + officeCount +
+        ' | Out Of Office: ' + oooCount;
+      wrap.appendChild(summary);
 
-  const summary = document.createElement('div');
-  summary.className = 'muted';
-  summary.style.marginBottom = '8px';
-  summary.textContent =
-    'Total: ' + totalCount +
-    ' | WFH: ' + wfhCount +
-    ' | Office: ' + officeCount +
-    ' | Out Of Office: ' + oooCount;
-  wrap.appendChild(summary);
-
-  const table = document.createElement('table');
-  table.innerHTML = `
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Team</th>
-        <th>Status</th>
-        <th>Updated</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  `;
-
+      const table = document.createElement('table');
+      table.innerHTML = \`
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Team</th>
+            <th>Status</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      \`;
 
       const tbody = table.querySelector('tbody');
 
