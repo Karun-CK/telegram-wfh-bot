@@ -130,7 +130,7 @@ function buildCalendarKeyboard(action, y, mo) {
   const mondayFirstOffset = (firstDow + 6) % 7;
 
   const rows = [];
-  rows.push([Markup.button.callback(`📅 ${monthLabel(y, mo)}`, calCb(action, 'NAV', `${y}-${pad2(mo)}`))]);
+  rows.push([Markup.button.callback(`Calendar: ${monthLabel(y, mo)}`, calCb(action, 'NAV', `${y}-${pad2(mo)}`))]);
 
   rows.push(['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map(t =>
     Markup.button.callback(t, calCb(action, 'NAV', `${y}-${pad2(mo)}`))
@@ -157,8 +157,8 @@ function buildCalendarKeyboard(action, y, mo) {
   const next = mo === 12 ? { y: y + 1, mo: 1 } : { y, mo: mo + 1 };
 
   rows.push([
-    Markup.button.callback('◀ Prev', calCb(action, 'NAV', `${prev.y}-${pad2(prev.mo)}`)),
-    Markup.button.callback('Next ▶', calCb(action, 'NAV', `${next.y}-${pad2(next.mo)}`))
+    Markup.button.callback('< Prev', calCb(action, 'NAV', `${prev.y}-${pad2(prev.mo)}`)),
+    Markup.button.callback('Next >', calCb(action, 'NAV', `${next.y}-${pad2(next.mo)}`))
   ]);
 
   return Markup.inlineKeyboard(rows);
