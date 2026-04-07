@@ -118,8 +118,41 @@ function monthLabel(y, mo) {
   return dt.toLocaleString('en-US', { month: 'long', year: 'numeric' });
 }
 
+function isISODate(s) {
+  return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+}
+
+function isoToday() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+// Team options
+const TEAM_OPTIONS = [
+  { key: 'PC', label: 'PC' },
+  { key: 'AE', label: 'AE' },
+  { key: 'LIQUID', label: 'LIQUID' },
+  { key: 'HDI', label: 'HDI' },
+  { key: 'AOS_CCV_EDM', label: 'AOS/CCV/EDM' },
+  { key: 'CAF', label: 'CAF' },
+  { key: 'NEV', label: 'NEV' },
+  { key: 'SIMULATION', label: 'SIMULATION' }
+];
+
+function isValidTeamKey(teamKey) {
+  return TEAM_OPTIONS.some(t => t.key === teamKey);
+}
+
+function teamLabelFromKey(teamKey) {
+  const found = TEAM_OPTIONS.find(t => t.key === teamKey);
+  return found ? found.label : teamKey;
+}
+
 // Calendar callback data
-// action format: <MODE>_<TEAM> where MODE in {WFH, OFFICE, OOO} and TEAM in {PC, AE}
+// action format: <MODE>_<TEAMKEY>
 function calCb(action, type, value) {
   return `CAL|${action}|${type}|${value}`;
 }
@@ -169,7 +202,7 @@ async function saveEntry(store, tgId, dateISO, mode, team) {
   store.entries[dateISO] = store.entries[dateISO] || {};
   store.entries[dateISO][String(tgId)] = {
     mode, // WFH | OFFICE | OOO
-    team, // PC | AE
+    team, // PC | AE | LIQUID | HDI | AOS/CCV/EDM | CAF | NEV | SIMULATION
     ts: new Date().toISOString()
   };
 }
@@ -186,17 +219,17 @@ bot.start(async (ctx) => {
     '/wfh - select Team then pick a date (DM only)\n' +
     '/office - select Team then pick a date (DM only)\n' +
     '/ooo - select Team then pick a date (DM only)\n\n' +
-    'To view everyone’s status, use the web dashboard:\n' +
+    'To view everyone\'s status, use the web dashboard:\n' +
     `${BASE_URL}/dashboard`
   );
 });
 
 // Team picker keyboard
 function teamKeyboard(mode) {
-  return Markup.inlineKeyboard([
-    [Markup.button.callback('PC', `TEAM|${mode}|PC`)],
-    [Markup.button.callback('AE', `TEAM|${mode}|AE`)]
+  const rows = TEAM_OPTIONS.map(t => [
+    Markup.button.callback(t.label, `TEAM|${mode}|${t.key}`)
   ]);
+  return Markup.inlineKeyboard(rows);
 }
 
 // Send DM silently (no group reply). If DM fails, do nothing.
@@ -231,17 +264,20 @@ bot.command('ooo', async (ctx) => {
 });
 
 // Team selection: only allow in private
-bot.action(/^TEAM\|(WFH|OFFICE|OOO)\|(PC|AE)$/, async (ctx) => {
+bot.action(/^TEAM\|(WFH|OFFICE|OOO)\|(.+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   if (!isPrivate(ctx)) return;
 
   const mode = ctx.match[1];
   const team = ctx.match[2];
+
+  if (!isValidTeamKey(team)) return;
+
   return openCalendar(ctx, `${mode}_${team}`);
 });
 
 // Calendar navigation
-bot.action(/^CAL\|((?:WFH|OFFICE|OOO)_(?:PC|AE))\|NAV\|(\d{4}-\d{2})$/, async (ctx) => {
+bot.action(/^CAL\|((?:WFH|OFFICE|OOO)_[A-Z_]+)\|NAV\|(\d{4}-\d{2})$/, async (ctx) => {
   await ctx.answerCbQuery();
   if (!isPrivate(ctx)) return;
 
@@ -255,7 +291,7 @@ bot.action(/^CAL\|((?:WFH|OFFICE|OOO)_(?:PC|AE))\|NAV\|(\d{4}-\d{2})$/, async (c
 });
 
 // Calendar pick
-bot.action(/^CAL\|((?:WFH|OFFICE|OOO)_(?:PC|AE))\|PICK\|(\d{4}-\d{2}-\d{2})$/, async (ctx) => {
+bot.action(/^CAL\|((?:WFH|OFFICE|OOO)_[A-Z_]+)\|PICK\|(\d{4}-\d{2}-\d{2})$/, async (ctx) => {
   await ctx.answerCbQuery();
   if (!isPrivate(ctx)) return;
 
@@ -264,23 +300,28 @@ bot.action(/^CAL\|((?:WFH|OFFICE|OOO)_(?:PC|AE))\|PICK\|(\d{4}-\d{2}-\d{2})$/, a
 
   if (!parseISODate(dateISO)) return ctx.reply('Invalid date.');
 
+  const firstUnderscore = action.indexOf('_');
+  const mode = action.slice(0, firstUnderscore);
+  const teamKey = action.slice(firstUnderscore + 1);
+
+  if (!isValidTeamKey(teamKey)) {
+    return ctx.reply('Invalid team.');
+  }
+
   try {
     const store = await readStore();
 
     await withWriteLock(async () => {
       await ensureUser(store, ctx.from);
-
-      const [mode, team] = action.split('_');
-      await saveEntry(store, ctx.from.id, dateISO, mode, team);
-
+      await saveEntry(store, ctx.from.id, dateISO, mode, teamLabelFromKey(teamKey));
       await writeStore(store);
     });
 
-    const [mode, team] = action.split('_');
     const modeLabel = mode === 'OOO' ? 'Out Of Office' : mode;
+    const savedTeamLabel = teamLabelFromKey(teamKey);
 
     return ctx.reply(
-      `Saved: ${modeLabel} (${team}) for ${dateISO}. You can change it anytime.\n\n` +
+      `Saved: ${modeLabel} (${savedTeamLabel}) for ${dateISO}. You can change it anytime.\n\n` +
       `Dashboard: ${BASE_URL}/dashboard`
     );
   } catch (e) {
@@ -293,18 +334,6 @@ bot.action(/^CAL\|((?:WFH|OFFICE|OOO)_(?:PC|AE))\|PICK\|(\d{4}-\d{2}-\d{2})$/, a
     return ctx.reply(`Storage error (JSONbin). (${e?.response?.status || 'no-status'}) Please try again.`);
   }
 });
-
-function isISODate(s) {
-  return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
-}
-
-function isoToday() {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-}
 
 //
 // Public Web API + Dashboard
@@ -352,7 +381,6 @@ app.get('/api/status-range', async (req, res) => {
     const users = store.users || {};
     const entriesByDate = store.entries || {};
 
-    // Get all dates in the store from "from" onwards, sorted
     const dates = Object.keys(entriesByDate)
       .filter(isISODate)
       .filter(d => d >= from)
@@ -361,7 +389,6 @@ app.get('/api/status-range', async (req, res) => {
     const days = dates.map(date => {
       const dayEntries = entriesByDate[date] || {};
 
-      // Only include users that actually have an entry for that date
       const rows = Object.entries(dayEntries)
         .map(([tgId, entry]) => {
           const u = users[tgId] || {};
