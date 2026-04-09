@@ -443,6 +443,17 @@ app.get('/dashboard', (req, res) => {
     .WFH { background:#e8f3ff; }
     .OFFICE { background:#e9f9ee; }
     .OOO { background:#fff2e6; }
+
+    .seat-line { margin: 6px 0 10px 0; font-weight: bold; }
+    .seat-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-weight: bold;
+      color: #fff;
+    }
+    .seat-ok { background: #1f9d55; }
+    .seat-negative { background: #d64545; }
   </style>
 </head>
 <body>
@@ -511,6 +522,7 @@ app.get('/dashboard', (req, res) => {
       const officeCount = (day.rows || []).filter(r => r.status === 'OFFICE').length;
       const oooCount = (day.rows || []).filter(r => r.status === 'OOO').length;
       const totalCount = (day.rows || []).length;
+      const availableSeats = 75 - officeCount;
 
       const summary = document.createElement('div');
       summary.className = 'muted';
@@ -521,6 +533,17 @@ app.get('/dashboard', (req, res) => {
         ' | Office: ' + officeCount +
         ' | Out Of Office: ' + oooCount;
       wrap.appendChild(summary);
+
+      const seatsLine = document.createElement('div');
+      seatsLine.className = 'seat-line';
+
+      const seatClass = availableSeats < 0 ? 'seat-badge seat-negative' : 'seat-badge seat-ok';
+
+      seatsLine.innerHTML =
+        'Total free seats for this day = ' +
+        '<span class="' + seatClass + '">' + esc(availableSeats) + '</span>';
+
+      wrap.appendChild(seatsLine);
 
       const table = document.createElement('table');
       table.innerHTML = \`
@@ -563,6 +586,7 @@ app.get('/dashboard', (req, res) => {
 </html>
   `);
 });
+
 
 // Health
 app.get('/', (req, res) => res.status(200).send('OK'));
