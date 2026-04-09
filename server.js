@@ -138,7 +138,7 @@ const TEAM_OPTIONS = [
   { key: 'HDI', label: 'HDI' },
   { key: 'AOS_CCV_EDM', label: 'AOS/CCV/EDM' },
   { key: 'CAF', label: 'CAF' },
-  { key: 'NEV', label: 'NEV' },
+  { key: 'IP', label: 'IP' },
   { key: 'SIMULATION', label: 'SIMULATION' }
 ];
 
